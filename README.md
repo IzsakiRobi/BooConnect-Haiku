@@ -1,3 +1,8 @@
+<p align="center">
+<img width="400" height="500" alt="Teaser" src="https://github.com/IzsakiRobi/BooConnect-Haiku/blob/main/Screenshots/Teaser.png?raw=true" />
+</p>p
+
+
 # BooConnect for Haiku
 
 **BooConnect** is a small native Haiku GUI for OpenConnect / Cisco AnyConnect VPN connections.
