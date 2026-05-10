@@ -1,0 +1,136 @@
+#!/bin/sh
+
+LOG_FILE=${VPNC_SCRIPT_LOG:-/var/log/booconnect-vpnc-script.log}
+LOG_ENABLED=${VPNC_SCRIPT_LOG_ENABLED:-0}
+
+log()
+{
+	[ "$LOG_ENABLED" = "1" ] || return 0
+	mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+	printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
+}
+
+run_quiet()
+{
+	if [ "$LOG_ENABLED" = "1" ]; then
+		"$@" >> "$LOG_FILE" 2>&1
+	else
+		"$@" >/dev/null 2>&1
+	fi
+}
+
+prefix_to_netmask()
+{
+	case "$1" in
+		0) echo 0.0.0.0 ;;
+		8) echo 255.0.0.0 ;;
+		16) echo 255.255.0.0 ;;
+		24) echo 255.255.255.0 ;;
+		25) echo 255.255.255.128 ;;
+		26) echo 255.255.255.192 ;;
+		27) echo 255.255.255.224 ;;
+		28) echo 255.255.255.240 ;;
+		29) echo 255.255.255.248 ;;
+		30) echo 255.255.255.252 ;;
+		31) echo 255.255.255.254 ;;
+		32) echo 255.255.255.255 ;;
+		*) echo 255.255.255.0 ;;
+	esac
+}
+
+route_add()
+{
+	log "route add $*"
+	run_quiet route add "$@" || log "route add failed: $*"
+}
+
+route_delete()
+{
+	log "route delete $*"
+	run_quiet route delete "$@" || log "route delete failed: $*"
+}
+
+add_split_routes()
+{
+	i=0
+	while [ "$i" -lt "${CISCO_SPLIT_INC:-0}" ]; do
+		eval network=\${CISCO_SPLIT_INC_${i}_ADDR}
+		eval netmask=\${CISCO_SPLIT_INC_${i}_MASK}
+		eval masklen=\${CISCO_SPLIT_INC_${i}_MASKLEN}
+		[ -n "$netmask" ] || netmask=$(prefix_to_netmask "$masklen")
+		if [ -n "$network" ] && [ -n "$netmask" ]; then
+			route_add "$TUNDEV" inet "$network" netmask "$netmask"
+		fi
+		i=$((i + 1))
+	done
+
+	for dns in $INTERNAL_IP4_DNS; do
+		route_add "$TUNDEV" inet "$dns" host
+	done
+}
+
+delete_split_routes()
+{
+	i=0
+	while [ "$i" -lt "${CISCO_SPLIT_INC:-0}" ]; do
+		eval network=\${CISCO_SPLIT_INC_${i}_ADDR}
+		eval netmask=\${CISCO_SPLIT_INC_${i}_MASK}
+		eval masklen=\${CISCO_SPLIT_INC_${i}_MASKLEN}
+		[ -n "$netmask" ] || netmask=$(prefix_to_netmask "$masklen")
+		if [ -n "$network" ] && [ -n "$netmask" ]; then
+			route_delete "$TUNDEV" inet "$network" netmask "$netmask"
+		fi
+		i=$((i + 1))
+	done
+
+	for dns in $INTERNAL_IP4_DNS; do
+		route_delete "$TUNDEV" inet "$dns" host
+	done
+}
+
+do_connect()
+{
+	: "${TUNDEV:=tun/0}"
+	: "${INTERNAL_IP4_MTU:=1406}"
+
+	log "connect TUNDEV=$TUNDEV IP4=$INTERNAL_IP4_ADDRESS NETMASK=$INTERNAL_IP4_NETMASK MTU=$INTERNAL_IP4_MTU SPLIT_COUNT=${CISCO_SPLIT_INC:-0}"
+
+	if [ -n "$INTERNAL_IP4_ADDRESS" ]; then
+		run_quiet ifconfig "$TUNDEV" inet "$INTERNAL_IP4_ADDRESS" \
+			"${INTERNAL_IP4_NETMASK:-255.255.255.255}" mtu "$INTERNAL_IP4_MTU" up \
+			|| log "ifconfig failed for $TUNDEV"
+	fi
+
+	add_split_routes
+}
+
+do_disconnect()
+{
+	: "${TUNDEV:=tun/0}"
+	log "disconnect TUNDEV=$TUNDEV"
+
+	delete_split_routes
+
+	if [ -n "$INTERNAL_IP4_ADDRESS" ]; then
+		run_quiet ifconfig --delete "$TUNDEV" inet "$INTERNAL_IP4_ADDRESS" \
+			|| log "ifconfig delete failed for $TUNDEV $INTERNAL_IP4_ADDRESS"
+	fi
+	run_quiet ifconfig "$TUNDEV" down || log "ifconfig down failed for $TUNDEV"
+}
+
+case "$reason" in
+	pre-init)
+		log "pre-init TUNDEV=$TUNDEV"
+		;;
+	connect|reconnect)
+		do_connect
+		;;
+	disconnect)
+		do_disconnect
+		;;
+	*)
+		log "ignored reason=$reason TUNDEV=$TUNDEV"
+		;;
+esac
+
+exit 0
