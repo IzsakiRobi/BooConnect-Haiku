@@ -1,2 +1,2 @@
 # BooConnect-Haiku
-**BooConnect** is a lightweight, modern GUI client designed specifically for **Cisco AnyConnect** VPNs, in HAIKU OS
+**BooConnect-Haiku** is a lightweight, modern GUI client designed specifically for **Cisco AnyConnect** VPNs, in HAIKU OS
